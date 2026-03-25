@@ -1,12 +1,7 @@
 from pathlib import Path
+import importlib
 import math
-
-
-# Name der CSV-Datei im aktuellen Ordner
-DATEINAME = "Daten (Set IV, A6) [CSV].csv"
-
-# Name der Ausgabedatei für das Histogramm
-HISTOGRAMM_DATEI = "histogramm.png"
+import sys
 
 
 def lade_daten(dateipfad):
@@ -76,22 +71,28 @@ def berechne_kennzahlen(werte):
 def erstelle_histogramm(werte, mittelwert, standardabweichung, ausgabedatei):
     """Erstellt ein Histogramm und speichert es als PNG-Datei."""
     try:
-        import matplotlib.pyplot as plt
+        matplotlib = importlib.import_module("matplotlib")
+        matplotlib.use("Agg")
+        plt = importlib.import_module("matplotlib.pyplot")
     except ImportError as fehler:
+        python_pfad = sys.executable
         raise ImportError(
-            "Für das Histogramm wird matplotlib benötigt. "
-            "Installiere es mit: pip install matplotlib"
+            "Für das Histogramm wird matplotlib benötigt.\n"
+            f"Verwendetes Python: {python_pfad}\n"
+            f"Installiere es genau dafür mit:\n\"{python_pfad}\" -m pip install matplotlib"
         ) from fehler
 
     minimum = min(werte)
     maximum = max(werte)
+    ausgabedatei = Path(ausgabedatei).resolve()
+    ausgabedatei.parent.mkdir(parents=True, exist_ok=True)
 
-    # Einfache Wahl der Klassenzahl: ungefähr Wurzel aus n.
+    # Wahl der Klassenzahl: ungefähr Wurzel aus n.
     anzahl_klassen = max(6, round(math.sqrt(len(werte))))
 
     # Das Histogramm verwendet damit äquidistante Klassen.
-    plt.figure(figsize=(10, 6))
-    plt.hist(
+    figur, achse = plt.subplots(figsize=(10, 6))
+    achse.hist(
         werte,
         bins=anzahl_klassen,
         edgecolor="black",
@@ -99,7 +100,7 @@ def erstelle_histogramm(werte, mittelwert, standardabweichung, ausgabedatei):
     )
 
     # Erwartungswert als senkrechte Linie
-    plt.axvline(
+    achse.axvline(
         mittelwert,
         color="red",
         linewidth=2,
@@ -107,7 +108,7 @@ def erstelle_histogramm(werte, mittelwert, standardabweichung, ausgabedatei):
     )
 
     # Bereich von mu - sigma bis mu + sigma als zusätzliche Orientierung
-    plt.axvspan(
+    achse.axvspan(
         mittelwert - standardabweichung,
         mittelwert + standardabweichung,
         color="orange",
@@ -115,21 +116,72 @@ def erstelle_histogramm(werte, mittelwert, standardabweichung, ausgabedatei):
         label="Bereich: Mittelwert ± Standardabweichung",
     )
 
-    plt.title("Histogramm der empirischen Verteilung")
-    plt.xlabel("Temperatur")
-    plt.ylabel("Häufigkeit")
-    plt.xlim(minimum, maximum)
-    plt.grid(axis="y", alpha=0.3)
-    plt.legend()
-    plt.tight_layout()
-    plt.savefig(ausgabedatei, dpi=150)
-    plt.close()
+    achse.set_title("Histogramm der empirischen Verteilung")
+    achse.set_xlabel("Temperatur")
+    achse.set_ylabel("Häufigkeit")
+
+    # Falls alle Werte identisch sind, braucht die x-Achse trotzdem einen kleinen Bereich.
+    if minimum == maximum:
+        achse.set_xlim(minimum - 0.5, maximum + 0.5)
+    else:
+        achse.set_xlim(minimum, maximum)
+
+    achse.grid(axis="y", alpha=0.3)
+    achse.legend()
+    figur.tight_layout()
+    figur.savefig(str(ausgabedatei), format="png", dpi=150)
+    plt.close(figur)
+
+    if not ausgabedatei.exists():
+        raise OSError(f"Die PNG-Datei wurde nicht gespeichert: {ausgabedatei}")
+
+
+def waehle_datei(aktueller_ordner):
+    """Bestimmt die gewünschte CSV-Datei."""
+    # Optional kann der Dateiname direkt beim Start übergeben werden.
+    if len(sys.argv) > 1:
+        dateiname = sys.argv[1].strip()
+    else:
+        dateiname = input("Gib den Namen der CSV-Datei im Ordner 'Daten' ein: ").strip()
+
+    if not dateiname:
+        raise ValueError("Es wurde kein Dateiname eingegeben.")
+
+    dateipfad = Path(dateiname)
+
+    # Relative Pfade werden auf den Ordner des Skripts bezogen.
+    if not dateipfad.is_absolute():
+        moegliche_pfade = [
+            aktueller_ordner / "Daten" / dateipfad,
+            aktueller_ordner / dateipfad,
+        ]
+
+        for pfad in moegliche_pfade:
+            if pfad.exists():
+                return pfad
+
+        dateipfad = aktueller_ordner / dateipfad
+
+    return dateipfad
+
+
+def bestimme_ausgabedatei(dateipfad):
+    """Erstellt einen passenden Dateinamen für das Histogramm."""
+    histogramm_ordner = dateipfad.parent / "Histogramme"
+    histogramm_ordner.mkdir(exist_ok=True)
+    return histogramm_ordner / f"{dateipfad.stem}_Histogramm.png"
 
 
 def main():
     aktueller_ordner = Path(__file__).resolve().parent
-    dateipfad = aktueller_ordner / DATEINAME
-    ausgabedatei = aktueller_ordner / HISTOGRAMM_DATEI
+
+    try:
+        dateipfad = waehle_datei(aktueller_ordner)
+    except ValueError as fehler:
+        print(fehler)
+        return
+
+    ausgabedatei = bestimme_ausgabedatei(dateipfad)
 
     if not dateipfad.exists():
         print(f"Die Datei wurde nicht gefunden: {dateipfad}")
@@ -144,6 +196,7 @@ def main():
 
     print("Auswertung der empirischen Verteilung")
     print("------------------------------------")
+    print(f"Datei:                   {dateipfad.name}")
     print(f"Anzahl der Werte:        {kennzahlen['anzahl']}")
     print(f"Minimum:                 {kennzahlen['minimum']:.3f}")
     print(f"Maximum:                 {kennzahlen['maximum']:.3f}")
